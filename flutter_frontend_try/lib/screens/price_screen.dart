@@ -2,6 +2,63 @@ import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:socket_io_client/socket_io_client.dart' as socket_io;
 
+// Servicio para manejar la conexión del socket
+class SocketService {
+  late socket_io.Socket socket;
+  final Function(Map<String, dynamic>) onPriceUpdate;
+  final Function(String) onServerMessage;
+  final Function(bool) onConnectionStatusChange;
+
+  SocketService({
+    required this.onPriceUpdate,
+    required this.onServerMessage,
+    required this.onConnectionStatusChange,
+  });
+
+  void initialize() {
+    final String serverUrl = dotenv.env['SOCKET_SERVER']!;
+    socket = socket_io.io(serverUrl, <String, dynamic>{
+      'transports': ['websocket'],
+      'autoConnect': false,
+    });
+
+    socket.connect();
+
+    socket.on('connect', (_) {
+      onConnectionStatusChange(true);
+      debugPrint('✅ Conectado al servidor');
+    });
+
+    socket.on('disconnect', (_) {
+      onConnectionStatusChange(false);
+      debugPrint('❌ Desconectado');
+    });
+
+    socket.on('connect_error', (error) {
+      debugPrint('❌ Error de conexión: $error');
+      onConnectionStatusChange(false);
+    });
+
+    socket.on('priceUpdate', (data) {
+      debugPrint('📈 Actualización recibida: $data');
+      onPriceUpdate(Map<String, dynamic>.from(data));
+    });
+
+    socket.on('messageFromServer', (data) {
+      debugPrint('💬 Mensaje del servidor: $data');
+      onServerMessage(data.toString());
+    });
+  }
+
+  void reconnect() {
+    socket.connect();
+  }
+
+  void dispose() {
+    socket.dispose();
+  }
+}
+
 // Define un StatefulWidget llamado PriceScreen
 class PriceScreen extends StatefulWidget {
   const PriceScreen({super.key});
@@ -12,8 +69,6 @@ class PriceScreen extends StatefulWidget {
 
 // Define el estado asociado al widget PriceScreen
 class _PriceScreenState extends State<PriceScreen> {
-  // Declaración de la variable socket para la conexión
-  late socket_io.Socket socket;
   // Variable para almacenar los datos del precio recibidos
   Map<String, dynamic>? priceData;
   // Variable para almacenar mensajes simples enviados desde el servidor
@@ -21,71 +76,40 @@ class _PriceScreenState extends State<PriceScreen> {
   // Bandera para indicar el estado de conexión
   bool isConnected = false;
 
+  // Instancia del servicio de conexión
+  late SocketService socketService;
+
   @override
   void initState() {
     super.initState();
+    socketService = SocketService(
+      onPriceUpdate: (data) {
+        if (!mounted) return;
+        setState(() {
+          priceData = data;
+        });
+      },
+      onServerMessage: (message) {
+        if (!mounted) return;
+        setState(() {
+          serverMessage = message;
+        });
+      },
+      onConnectionStatusChange: (status) {
+        if (!mounted) return;
+        setState(() {
+          isConnected = status;
+        });
+      },
+    );
     // Inicializa la conexión del socket al iniciar el widget
-    _initializeSocket();
-  }
-
-  // Método que configura e inicializa la conexión con el servidor WebSocket
-  void _initializeSocket() {
-    // Obtiene la URL del servidor desde las variables de entorno.
-    final String serverUrl = dotenv.env['SOCKET_SERVER']!;
-    // Configura el socket con transporte WebSocket y sin conexión automática
-    socket = socket_io.io(serverUrl, <String, dynamic>{
-      'transports': ['websocket'],
-      'autoConnect': false,
-    });
-
-    // Conectar al servidor
-    socket.connect();
-
-    // Evento que se ejecuta cuando se logra la conexión con el servidor
-    socket.on('connect', (_) {
-      setState(() {
-        isConnected = true;
-      });
-      debugPrint('✅ Conectado al servidor');
-    });
-
-    // Evento que se ejecuta cuando se pierde la conexión
-    socket.on('disconnect', (_) {
-      setState(() {
-        isConnected = false;
-      });
-      debugPrint('❌ Desconectado');
-    });
-
-    // Evento que maneja errores de conexión
-    socket.on('connect_error', (error) {
-      debugPrint('❌ Error de conexión: $error');
-      setState(() {
-        isConnected = false;
-      });
-    });
-
-    // Evento que maneja la recepción de datos de precio en tiempo real
-    socket.on('priceUpdate', (data) {
-      debugPrint('📈 Actualización recibida: $data');
-      setState(() {
-        priceData = Map<String, dynamic>.from(data);
-      });
-    });
-
-    // Evento que maneja mensajes simples enviados desde el servidor
-    socket.on('messageFromServer', (data) {
-      debugPrint('💬 Mensaje del servidor: $data');
-      setState(() {
-        serverMessage = data.toString();
-      });
-    });
+    socketService.initialize();
   }
 
   @override
   void dispose() {
     // Libera los recursos del socket antes de destruir el widget
-    socket.dispose();
+    socketService.dispose();
     super.dispose();
   }
 
@@ -128,7 +152,8 @@ class _PriceScreenState extends State<PriceScreen> {
                   isConnected
                       ? null
                       : () {
-                        socket.connect();
+                        // Intento de reconexión manual mediante el servicio
+                        socketService.reconnect();
                       },
               child: const Text('Reconectar'),
             ),
@@ -158,7 +183,6 @@ class _PriceScreenState extends State<PriceScreen> {
                     ),
                   ],
                 ),
-
             const SizedBox(height: 40),
 
             // Sección para mostrar mensajes enviados desde el servidor

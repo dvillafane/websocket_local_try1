@@ -3,7 +3,13 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'screens/price_screen.dart';
 
 Future<void> main() async {
-  await dotenv.load(fileName: ".env");
+  // Agrega manejo de errores al cargar el archivo .env
+  try {
+    await dotenv.load(fileName: ".env");
+  } catch (e) {
+    debugPrint('Error al cargar las variables de entorno: $e');
+    // Aquí podrías establecer valores por defecto o detener la aplicación
+  }
   runApp(const MyApp());
 }
 
