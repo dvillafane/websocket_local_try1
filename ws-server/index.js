@@ -1,6 +1,7 @@
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
+const readline = require('readline');
 
 // Crea una aplicación Express
 const app = express();
@@ -35,8 +36,21 @@ io.on('connection', (socket) => {
   });
 });
 
+// Configura la interfaz para leer desde la consola
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout
+});
+
+// Escucha cada línea escrita en la consola
+rl.on('line', (input) => {
+  // Envía el mensaje a todos los clientes conectados
+  io.emit('messageFromServer', input);
+});
+
 // Configura el servidor para que escuche en el puerto 3000
 const PORT = 3000;
 server.listen(PORT, () => {
   console.log(`Servidor WebSocket corriendo en http://localhost:${PORT}`);
+  console.log('Escribe un mensaje y presiona enter para enviar a los clientes:');
 });
