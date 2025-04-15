@@ -1,37 +1,60 @@
-import 'package:flutter/material.dart'; // Importa el paquete principal de Flutter para UI y utilidades
+import 'package:flutter/material.dart';
 
-// Clase que maneja el estado de las conexiones y mensajes del socket
+// Clase que maneja datos recibidos por un socket y notifica a los widgets cuando hay cambios.
 class SocketData with ChangeNotifier {
-  final List<Map<String, String>> _messages = []; // Lista privada para almacenar los mensajes recibidos
-  bool _isConnected = false; // Estado de la conexión (conectado o no)
-  bool _isReconnecting = false; // Estado de reconexión (en intento de reconectar o no)
+  // Lista privada que almacena los mensajes recibidos.
+  final List<Map<String, String>> _messages = [];
 
-  // Getter que expone la lista de mensajes
+  // Variable privada que indica si la conexión está activa.
+  bool _isConnected = false;
+
+  // Variable privada que indica si se está intentando reconectar.
+  bool _isReconnecting = false;
+
+  // Getter para acceder a la lista de mensajes desde fuera de la clase.
   List<Map<String, String>> get messages => _messages;
 
-  // Getter que indica si el socket está conectado
+  // Getter para saber si la conexión está activa.
   bool get isConnected => _isConnected;
 
-  // Getter que indica si el socket está intentando reconectar
+  // Getter para saber si el socket está intentando reconectar.
   bool get isReconnecting => _isReconnecting;
 
-  // Método para agregar un nuevo mensaje a la lista
+  // Método para agregar un nuevo mensaje a la lista.
   void addMessage(String from, String message) {
-    debugPrint('[$from]: $message'); // Imprime el mensaje en la consola para depuración
-    _messages.add({'from': from, 'message': message}); // Añade el mensaje con su emisor
-    if (_messages.length > 50) _messages.removeAt(0); // Limita la lista a máximo 50 mensajes, elimina el más antiguo si excede
-    notifyListeners(); // Notifica a los widgets escuchando que hubo un cambio
+    // Imprime en la consola quién envió el mensaje y el contenido.
+    debugPrint('[$from]: $message');
+
+    // Agrega el nuevo mensaje a la lista.
+    _messages.add({'from': from, 'message': message});
+
+    // Si hay más de 50 mensajes, elimina el más antiguo.
+    if (_messages.length > 50) _messages.removeAt(0);
+
+    // Notifica a los widgets que escuchan que hubo un cambio en los datos.
+    notifyListeners();
   }
 
-  // Método para actualizar el estado de conexión
+  // Método para actualizar el estado de la conexión.
   void setConnectionStatus(bool status) {
-    _isConnected = status; // Actualiza el estado de conexión
-    notifyListeners(); // Notifica a los widgets que escuchan el cambio
+    _isConnected = status;
+    // Notifica a los widgets que hubo un cambio.
+    notifyListeners();
   }
 
-  // Método para actualizar el estado de reconexión
+  // Método para actualizar el estado de reconexión.
   void setReconnecting(bool status) {
-    _isReconnecting = status; // Actualiza el estado de reconexión
-    notifyListeners(); // Notifica a los widgets que escuchan el cambio
+    _isReconnecting = status;
+    // Notifica a los widgets que hubo un cambio.
+    notifyListeners();
+  }
+
+  // Método que simula la carga de mensajes antiguos.
+  void loadMoreMessages() {
+    // Inserta un mensaje falso al principio de la lista.
+    _messages.insert(0, {'from': 'server', 'message': 'Mensaje antiguo'});
+
+    // Notifica a los widgets que hubo un cambio en la lista.
+    notifyListeners();
   }
 }

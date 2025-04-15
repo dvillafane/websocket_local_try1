@@ -1,6 +1,6 @@
 /**
  * Servidor WebSocket para mensajes bidireccionales entre clientes y consola.
- * Con cluster, entrada de consola centralizada y mejoras en seguridad y rendimiento.
+ * Incluye cluster, entrada de consola centralizada y nuevas mejoras.
  */
 
 // Carga las variables de entorno desde un archivo .env
@@ -16,6 +16,7 @@ const cluster = require('cluster');
 const os = require('os');
 const readline = require('readline');
 const jwt = require('jsonwebtoken');
+const bodyParser = require('body-parser');
 
 // Número de CPUs disponibles para crear un worker por cada una
 const numCPUs = os.cpus().length;
@@ -38,13 +39,13 @@ const PORT = process.env.PORT || 3000;
 
 // Clave secreta para JWT (debe estar en variables de entorno en producción)
 const JWT_SECRET = process.env.JWT_SECRET || 'default-secret';
+const forbiddenWords = ['spam', 'insulto'];
 
 // Si este proceso es el maestro...
 if (cluster.isMaster) {
   logger.info(`Maestro ${process.pid} iniciado`);
-
-  // Crea un worker por cada CPU disponible
-  for (let i = 0; i < numCPUs; i++) {
+  const numWorkers = Math.min(numCPUs, 2); // Límite de 2 workers
+  for (let i = 0; i < numWorkers; i++) {
     cluster.fork();
   }
 
@@ -90,8 +91,19 @@ if (cluster.isMaster) {
 
   // Crea una aplicación de Express
   const app = express();
+  app.use(bodyParser.json());
 
-  // Crea un servidor HTTP basándose en la aplicación Express
+  // Nuevo endpoint para autenticación
+  app.post('/login', (req, res) => {
+    const { username, password } = req.body;
+    if (username === 'test' && password === '1234') {
+      const token = jwt.sign({ user: username }, JWT_SECRET, { expiresIn: '1h' });
+      res.json({ token });
+    } else {
+      res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+  });
+
   const server = http.createServer(app);
 
   // Configura el servidor Socket.IO para habilitar el WebSocket
@@ -106,6 +118,7 @@ if (cluster.isMaster) {
 
   // Mapa para rastrear timestamps de mensajes por cliente
   const messageRateLimit = new Map();
+  const messageDailyLimit = new Map();
 
   // Middleware de autenticación de clientes usando JWT
   io.use((socket, next) => {
@@ -128,42 +141,52 @@ if (cluster.isMaster) {
   // Manejo de la conexión WebSocket
   io.on('connection', (socket) => {
     const socketId = socket.id;
-    messageRateLimit.set(socketId, []); // Inicializa array de timestamps
+    messageRateLimit.set(socketId, []);
+    messageDailyLimit.set(socketId, 0);
 
     logger.info('Nuevo cliente conectado', { socketId });
 
     // Cuando se recibe un mensaje del cliente
     socket.on('clientMessage', (message) => {
-      const now = Date.now();
-      const timestamps = messageRateLimit.get(socketId);
+      try {
+        const now = Date.now();
+        const timestamps = messageRateLimit.get(socketId);
+        const recentTimestamps = timestamps.filter((t) => now - t < 1000);
+        if (recentTimestamps.length >= 5) {
+          throw new Error('Límite de tasa excedido');
+        }
 
-      // Filtra timestamps del último segundo (Punto 4: Límite de mensajes)
-      const recentTimestamps = timestamps.filter((t) => now - t < 1000);
-      if (recentTimestamps.length >= 5) {
-        logger.warn('Límite de tasa excedido', { socketId });
-        socket.emit('error', 'Límite de mensajes excedido: máximo 5 mensajes por segundo');
-        return;
-      }
+        let dailyCount = messageDailyLimit.get(socketId);
+        if (dailyCount >= 1000) {
+          throw new Error('Límite diario de mensajes alcanzado');
+        }
 
-      // Agrega el nuevo timestamp
-      recentTimestamps.push(now);
-      messageRateLimit.set(socketId, recentTimestamps);
+        if (typeof message !== 'string' || message.trim().length > 200) {
+          throw new Error('Mensaje inválido');
+        }
 
-      // Validación del mensaje (Punto 3: Manejo de errores)
-      if (typeof message === 'string' && message.trim().length <= 200) {
         const cleanMessage = sanitize(message.trim(), { allowedTags: [], allowedAttributes: {} });
+        if (forbiddenWords.some(word => cleanMessage.includes(word))) {
+          throw new Error('Contenido no permitido');
+        }
+
+        recentTimestamps.push(now);
+        messageRateLimit.set(socketId, recentTimestamps);
+        messageDailyLimit.set(socketId, dailyCount + 1);
+
         logger.info('Mensaje del cliente recibido', { message: cleanMessage });
         socket.broadcast.emit('message', { from: 'client', message: cleanMessage });
-      } else {
-        logger.warn('Mensaje inválido', { socketId });
-        socket.emit('error', 'Mensaje inválido: debe ser un string no vacío y menor a 200 caracteres');
+      } catch (err) {
+        logger.warn('Error procesando mensaje', { socketId, error: err.message });
+        socket.emit('error', err.message);
       }
     });
 
     // Manejo de la desconexión del cliente
     socket.on('disconnect', () => {
       logger.info('Cliente desconectado', { socketId });
-      messageRateLimit.delete(socketId); // Limpia al desconectar
+      messageRateLimit.delete(socketId);
+      messageDailyLimit.delete(socketId);
     });
 
     // Manejo de errores específicos del socket (Punto 3: Manejo de errores)
