@@ -1,6 +1,6 @@
 /**
  * Servidor WebSocket para mensajes bidireccionales entre clientes y consola.
- * Con cluster y entrada de consola centralizada en el proceso maestro
+ * Con cluster, entrada de consola centralizada y mejoras en seguridad y rendimiento.
  */
 
 // Carga las variables de entorno desde un archivo .env
@@ -11,16 +11,14 @@ const express = require('express'); // Framework para servidor web
 const http = require('http'); // Módulo nativo para crear servidor HTTP
 const socketIo = require('socket.io'); // Biblioteca para comunicación WebSocket
 const sanitize = require('sanitize-html'); // Para limpiar el HTML en los mensajes
-const rateLimit = require('express-rate-limit'); // Middleware para limitar peticiones
 const winston = require('winston'); // Librería para logging
 const cluster = require('cluster'); // Permite crear procesos hijos
 const os = require('os'); // Para obtener información del sistema
+const readline = require('readline');
+const jwt = require('jsonwebtoken');
 
 // Número de CPUs disponibles para crear un worker por cada una
 const numCPUs = os.cpus().length;
-
-// Librería para entrada de consola interactiva
-const readline = require('readline');
 
 // Configura el logger con formato y destinos (archivo y consola)
 const logger = winston.createLogger({
@@ -37,6 +35,9 @@ const logger = winston.createLogger({
 
 // Define el puerto a usar (desde .env o 3000 por defecto)
 const PORT = process.env.PORT || 3000;
+
+// Clave secreta para JWT (debe estar en variables de entorno en producción)
+const JWT_SECRET = process.env.JWT_SECRET || 'tu-clave-secreta';
 
 // Si este proceso es el maestro...
 if (cluster.isMaster) {
@@ -103,35 +104,51 @@ if (cluster.isMaster) {
     },
   });
 
-  // Configura el rate limiting para evitar abusos
-  const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // Periodo de 15 minutos
-    max: 100, // Máximo 100 conexiones por IP en ese periodo
-    message: 'Demasiadas conexiones, intenta de nuevo más tarde.',
-  });
-  app.use(limiter);
+  // Mapa para rastrear timestamps de mensajes por cliente
+  const messageRateLimit = new Map();
 
-  // Sirve archivos estáticos de la carpeta 'public'
-  app.use(express.static('public'));
-
-  // Middleware de autenticación de clientes usando token
+  // Middleware de autenticación de clientes usando JWT
   io.use((socket, next) => {
     const token = socket.handshake.auth.token;
-    if (token && token === process.env.CLIENT_TOKEN) {
-      next();
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        socket.user = decoded;
+        next();
+      } catch (err) {
+        logger.warn('Token inválido', { socketId: socket.id });
+        next(new Error('Token inválido'));
+      }
     } else {
-      logger.warn('Autenticación fallida', { socketId: socket.id });
-      next(new Error('Autenticación fallida'));
+      logger.warn('Token no proporcionado', { socketId: socket.id });
+      next(new Error('Token no proporcionado'));
     }
   });
 
   // Manejo de la conexión WebSocket
   io.on('connection', (socket) => {
-    logger.info('Nuevo cliente conectado', { socketId: socket.id });
+    const socketId = socket.id;
+    messageRateLimit.set(socketId, []); // Inicializa array de timestamps
+
+    logger.info('Nuevo cliente conectado', { socketId });
 
     // Cuando se recibe un mensaje del cliente
     socket.on('clientMessage', (message) => {
-      // Verifica que el mensaje sea un string, no sea vacío y tenga longitud adecuada
+      const now = Date.now();
+      const timestamps = messageRateLimit.get(socketId);
+
+      // Filtra timestamps del último segundo
+      const recentTimestamps = timestamps.filter((t) => now - t < 1000);
+      if (recentTimestamps.length >= 5) {
+        logger.warn('Límite de tasa excedido', { socketId });
+        socket.emit('error', 'Límite de mensajes excedido: máximo 5 mensajes por segundo');
+        return;
+      }
+
+      // Agrega el nuevo timestamp
+      recentTimestamps.push(now);
+      messageRateLimit.set(socketId, recentTimestamps);
+
       if (typeof message === 'string' && message.trim().length <= 200) {
         // Limpia el mensaje para evitar etiquetas HTML y atributos no deseados
         const cleanMessage = sanitize(message.trim(), { allowedTags: [], allowedAttributes: {} });
@@ -139,22 +156,24 @@ if (cluster.isMaster) {
         // Envía el mensaje a todos menos al cliente emisor
         socket.broadcast.emit('message', { from: 'client', message: cleanMessage });
       } else {
-        logger.warn('Mensaje del cliente inválido', { socketId: socket.id });
+        logger.warn('Mensaje inválido', { socketId });
+        socket.emit('error', 'Mensaje inválido: debe ser un string no vacío y menor a 200 caracteres');
       }
     });
 
     // Manejo de la desconexión del cliente
     socket.on('disconnect', () => {
-      logger.info('Cliente desconectado', { socketId: socket.id });
+      logger.info('Cliente desconectado', { socketId });
+      messageRateLimit.delete(socketId); // Limpia al desconectar
     });
 
     // Manejo de errores específicos del socket
     socket.on('error', (error) => {
-      logger.error('Error en el socket', { socketId: socket.id, error });
+      logger.error('Error en el socket', { socketId, error });
     });
   });
 
-  // Escucha mensajes enviados desde el proceso maestro (por ejemplo, para apagar el servidor)
+  // Escucha mensajes enviados desde el proceso maestro
   process.on('message', (data) => {
     if (data) {
       if (data.shutdown) {
@@ -172,16 +191,6 @@ if (cluster.isMaster) {
         io.emit('message', data);
       }
     }
-  });
-
-  // Manejo global de errores que no fueron capturados
-  process.on('uncaughtException', (error) => {
-    logger.error('Error no capturado:', { error });
-  });
-
-  // Manejo de promesas rechazadas sin captura
-  process.on('unhandledRejection', (reason) => {
-    logger.error('Promesa rechazada:', { reason });
   });
 
   // Inicia el servidor HTTP escuchando en el puerto configurado
