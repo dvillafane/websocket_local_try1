@@ -1,77 +1,71 @@
-import 'package:flutter/material.dart'; // Paquete principal para construir UI
-import 'package:flutter_dotenv/flutter_dotenv.dart'; // Para cargar variables de entorno
-import 'package:provider/provider.dart'; // Gestión de estado con Provider
-import 'screens/chat_screen.dart'; // Importa la pantalla principal de chat
-import 'models/socket_data.dart'; // Importa el modelo de estado de Socket para manejar la lógica
+import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'screens/chat_screen.dart';
+import 'bloc/socket_bloc.dart';
 
-// Función principal asíncrona para preparar la app antes de arrancar
+// La función principal donde inicia la ejecución de la app.
 Future<void> main() async {
   bool envLoaded =
-      true; // Bandera para verificar si se cargó correctamente el .env
+      true; // Variable que indica si las variables de entorno se cargaron correctamente.
 
   try {
-    // Intenta cargar las variables de entorno desde el archivo ".env"
+    // Intenta cargar las variables de entorno desde el archivo .env.
     await dotenv.load(fileName: ".env");
   } catch (e) {
-    // En caso de error, muestra mensaje en consola y cambia bandera
+    // Si ocurre un error al cargar el archivo .env, imprime el error en la consola.
     debugPrint('Error al cargar las variables de entorno: $e');
-    envLoaded = false;
+    envLoaded = false; // Marca como false si hubo un fallo.
   }
 
-  // Inicializa la app proporcionando el modelo SocketData a todo el árbol de widgets
+  // Inicia la aplicación con un proveedor BLoC que inyecta el SocketBloc a toda la app.
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => SocketData(), // Crea la instancia del gestor de estado
+    BlocProvider(
+      create: (_) => SocketBloc(), // Crea una instancia de SocketBloc.
       child: MyApp(
         envLoaded: envLoaded,
-      ), // Inyecta la bandera de configuración al widget principal
+      ), // Pasa si las variables de entorno se cargaron correctamente.
     ),
   );
 }
 
-// Widget principal de la aplicación que configura MaterialApp
+// Clase principal de la aplicación que define la configuración visual.
 class MyApp extends StatelessWidget {
-  final bool envLoaded; // Indica si el archivo .env se cargó correctamente
-
-  const MyApp({
-    super.key,
-    required this.envLoaded,
-  }); // Constructor con parámetro requerido
+  final bool envLoaded; // Propiedad que indica si el .env se cargó con éxito.
+  const MyApp({super.key, required this.envLoaded}); // Constructor de la clase.
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Socket.IO Demo', // Título de la aplicación
+      title: 'Socket.IO Demo', // Título de la app.
       debugShowCheckedModeBanner:
-          false, // Oculta la cinta de "debug" en la esquina superior
+          false, // Oculta la etiqueta de debug en la esquina.
       theme: ThemeData(
-        useMaterial3: true, // Activa Material Design 3
+        useMaterial3: true, // Activa el estilo visual de Material 3.
         colorScheme: ColorScheme.fromSeed(
           seedColor: Colors.indigo,
-        ), // Configura esquema de colores basado en un "seed"
+        ), // Define un esquema de colores basado en un color semilla.
       ),
-      // Define la pantalla inicial dependiendo si el .env fue cargado correctamente
+      // Si las variables de entorno se cargaron, muestra la pantalla de chat; si no, muestra la pantalla de error.
       home: envLoaded ? const ChatScreen() : const ErrorScreen(),
     );
   }
 }
 
-// Pantalla que se muestra si falla la carga del archivo .env
+// Pantalla que se muestra cuando no se pudo cargar la configuración (.env).
 class ErrorScreen extends StatelessWidget {
-  const ErrorScreen({
-    super.key,
-  }); // Constructor constante para mejor rendimiento
+  const ErrorScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Center(
         child: Text(
-          'Error: No se pudo cargar la configuración', // Mensaje de error amigable para el usuario
+          'Error: No se pudo cargar la configuración', // Mensaje de error visible para el usuario.
           style: const TextStyle(
             fontSize: 18,
             color: Colors.red,
-          ), // Estilo rojo para indicar error
+          ), // Estilo de texto en rojo para destacar el error.
         ),
       ),
     );

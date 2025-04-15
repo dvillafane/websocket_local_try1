@@ -1,9 +1,10 @@
-import 'package:flutter/material.dart'; // Importa las herramientas de UI de Flutter
-import 'package:provider/provider.dart'; // Importa Provider para gestión de estado
-import '../models/socket_data.dart'; // Importa el modelo que maneja datos del socket
-import '../services/socket_service.dart'; // Importa el servicio que maneja la conexión socket
+// lib/screens/chat_screen.dart
 
-// Widget principal que representa la pantalla del chat
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../bloc/socket_bloc.dart';
+
+// Pantalla principal del chat, donde se mostrará la conversación.
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
 
@@ -11,105 +12,85 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-// Estado de la pantalla de chat
 class _ChatScreenState extends State<ChatScreen> {
-  late SocketService
-  socketService; // Instancia de SocketService para manejar la conexión
-  final TextEditingController _messageController =
-      TextEditingController(); // Controlador para el campo de texto
+  // Referencia al BLoC que maneja la lógica de conexión y mensajes.
+  late SocketBloc socketBloc;
+
+  // Controlador para manejar el texto del input de mensajes.
+  final TextEditingController _messageController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    final socketData = Provider.of<SocketData>(
-      context,
-      listen: false,
-    ); // Obtiene la instancia de SocketData sin escuchar cambios
-    socketService = SocketService(
-      onMessage: (from, message) {
-        socketData.addMessage(
-          from,
-          message,
-        ); // Añade mensaje recibido al modelo
-      },
-      onConnectionStatusChange: (status) {
-        socketData.setConnectionStatus(
-          status,
-        ); // Actualiza estado de conexión en el modelo
-        if (!status) {
-          socketData.setReconnecting(
-            false,
-          ); // Si pierde conexión, desactiva reconexión automática
-        }
-      },
-    );
-    socketService.initialize(); // Inicializa la conexión socket
+    // Obtiene una instancia del SocketBloc desde el contexto.
+    socketBloc = BlocProvider.of<SocketBloc>(context);
+    // Dispara el evento para inicializar la conexión de socket.
+    socketBloc.add(SocketInitializeEvent());
   }
 
   @override
   void dispose() {
-    socketService.dispose(); // Libera recursos de la conexión socket
-    _messageController.dispose(); // Libera recursos del controlador de texto
+    // Libera los recursos que usa el controlador de texto.
+    _messageController.dispose();
     super.dispose();
   }
 
-  // Método que construye el widget de cada burbuja de mensaje
+  // Widget que construye una burbuja de mensaje dependiendo del remitente.
   Widget _buildMessageBubble(Map<String, String> msg) {
-    final sender = msg['from'] ?? 'desconocido'; // Obtiene el remitente
-    final message = msg['message'] ?? ''; // Obtiene el contenido del mensaje
+    // Extrae el remitente y el contenido del mensaje.
+    final sender = msg['from'] ?? 'desconocido';
+    final message = msg['message'] ?? '';
 
-    Color bubbleColor; // Color de la burbuja
-    CrossAxisAlignment alignment; // Alineación de la burbuja
+    // Variables para definir el color y alineación de la burbuja.
+    Color bubbleColor;
+    CrossAxisAlignment alignment;
 
-    // Configura estilo según el remitente
+    // Condición para personalizar la burbuja si el mensaje es del usuario.
     if (sender == 'yo') {
-      bubbleColor =
-          Colors.blue[200]!; // Color para mensajes enviados por el usuario
-      alignment = CrossAxisAlignment.end; // Alinea a la derecha
-    } else if (sender.toLowerCase().contains('server') ||
+      bubbleColor = Colors.blue[200]!;
+      alignment = CrossAxisAlignment.end;
+    }
+    // Si el mensaje proviene del servidor.
+    else if (sender.toLowerCase().contains('server') ||
         sender.toLowerCase().contains('servidor')) {
-      bubbleColor = Colors.deepPurple[200]!; // Color para mensajes del servidor
-      alignment = CrossAxisAlignment.start; // Alinea a la izquierda
-    } else {
-      bubbleColor = Colors.grey[300]!; // Color para otros remitentes
-      alignment = CrossAxisAlignment.start; // Alinea a la izquierda
+      bubbleColor = Colors.deepPurple[200]!;
+      alignment = CrossAxisAlignment.start;
+    }
+    // Si el mensaje proviene del sistema.
+    else if (sender == 'system') {
+      bubbleColor = Colors.red[200]!;
+      alignment = CrossAxisAlignment.center;
+    }
+    // Caso general para otros remitentes.
+    else {
+      bubbleColor = Colors.grey[300]!;
+      alignment = CrossAxisAlignment.start;
     }
 
+    // Estructura visual de la burbuja.
     return Container(
-      margin: const EdgeInsets.symmetric(
-        vertical: 4,
-        horizontal: 8,
-      ), // Margen alrededor de cada burbuja
+      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
       child: Column(
-        crossAxisAlignment: alignment, // Alineación de burbuja
+        crossAxisAlignment: alignment,
         children: [
+          // Muestra el nombre del remitente.
           Text(
-            sender == 'yo'
-                ? 'Tú'
-                : sender, // Muestra 'Tú' si el remitente es el usuario
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey[600],
-            ), // Estilo del nombre del remitente
+            sender == 'yo' ? 'Tú' : sender,
+            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
           ),
+          // Contenedor del mensaje con estilo de burbuja.
           Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 14,
-              vertical: 10,
-            ), // Espaciado interno de la burbuja
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
-              color: bubbleColor, // Aplica el color definido según el remitente
+              color: bubbleColor,
               borderRadius: BorderRadius.only(
                 topLeft: const Radius.circular(16),
                 topRight: const Radius.circular(16),
                 bottomLeft: Radius.circular(sender == 'yo' ? 16 : 0),
                 bottomRight: Radius.circular(sender == 'yo' ? 0 : 16),
-              ), // Bordes redondeados personalizados según quién envió el mensaje
+              ),
             ),
-            child: Text(
-              message,
-              style: const TextStyle(fontSize: 16),
-            ), // Muestra el texto del mensaje
+            child: Text(message, style: const TextStyle(fontSize: 16)),
           ),
         ],
       ),
@@ -118,106 +99,103 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<SocketData>(
-      builder:
-          (context, socketData, child) => Scaffold(
-            appBar: AppBar(
-              title: Text(
-                socketData.isConnected
-                    ? 'Chat Activo' // Texto cuando la conexión está activa
-                    : socketData.isReconnecting
-                    ? 'Reconectando...' // Texto cuando intenta reconectar
-                    : 'Desconectado', // Texto cuando está desconectado
-              ),
+    // BlocConsumer escucha los estados del SocketBloc y reconstruye la UI.
+    return BlocConsumer<SocketBloc, SocketState>(
+      listener: (context, state) {
+        // Si se pierde la conexión y no está intentando reconectar, muestra un aviso.
+        if (!state.isConnected && !state.isReconnecting) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Desconectado del servidor')),
+          );
+        }
+      },
+      builder: (context, state) {
+        return Scaffold(
+          appBar: AppBar(
+            // Cambia el título del AppBar según el estado de la conexión.
+            title: Text(
+              state.isConnected
+                  ? 'Chat Activo'
+                  : state.isReconnecting
+                      ? 'Reconectando...'
+                      : 'Desconectado',
             ),
-            body: Column(
-              children: [
-                Expanded(
-                  child:
-                      socketData.messages.isEmpty
-                          ? const Center(
-                            child: Text('Aún no hay mensajes...'),
-                          ) // Mensaje cuando no hay mensajes
-                          : ListView.builder(
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 10,
-                            ), // Espacio alrededor de la lista
-                            reverse:
-                                true, // Muestra los mensajes más nuevos abajo
-                            itemCount:
-                                socketData
-                                    .messages
-                                    .length, // Número de mensajes
-                            itemBuilder: (context, index) {
-                              final reversedIndex =
-                                  socketData.messages.length -
-                                  1 -
-                                  index; // Invierte el orden de la lista
-                              return _buildMessageBubble(
-                                socketData.messages[reversedIndex],
-                              ); // Construye cada burbuja
-                            },
-                          ),
-                ),
-                const Divider(height: 1), // Línea divisoria sobre el input
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 6,
-                  ), // Espaciado alrededor de la fila de entrada
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller:
-                              _messageController, // Controlador que gestiona el texto ingresado
-                          decoration: const InputDecoration(
-                            hintText:
-                                'Escribe un mensaje...', // Texto de sugerencia
-                            border:
-                                OutlineInputBorder(), // Borde del campo de texto
-                          ),
-                          onSubmitted: (value) {
-                            if (value.trim().isNotEmpty) {
-                              // Verifica que el texto no esté vacío
-                              socketService.sendMessage(
-                                value.trim(),
-                              ); // Envía el mensaje
-                              _messageController
-                                  .clear(); // Limpia el campo de texto
-                            }
-                          },
-                        ),
-                      ),
-                      const SizedBox(
-                        width: 8,
-                      ), // Espacio entre el campo de texto y el botón
-                      IconButton(
-                        icon: const Icon(Icons.send), // Icono de enviar
-                        color: Colors.blue, // Color del botón
-                        onPressed:
-                            socketData.isConnected
-                                ? () {
-                                  final text =
-                                      _messageController.text
-                                          .trim(); // Obtiene el texto ingresado
-                                  if (text.isNotEmpty) {
-                                    // Verifica que no sea vacío
-                                    socketService.sendMessage(
-                                      text,
-                                    ); // Envía el mensaje
-                                    _messageController
-                                        .clear(); // Limpia el campo
-                                  }
-                                }
-                                : null, // Desactiva el botón si no hay conexión
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+            // Muestra un ícono diferente según el estado de la conexión.
+            leading: Icon(
+              state.isConnected
+                  ? Icons.wifi
+                  : state.isReconnecting
+                      ? Icons.sync
+                      : Icons.wifi_off,
+              color: state.isConnected ? Colors.green : Colors.red,
             ),
           ),
+          body: Column(
+            children: [
+              // Lista de mensajes ocupando todo el espacio disponible.
+              Expanded(
+                child: state.messages.isEmpty
+                    // Si no hay mensajes, muestra un texto.
+                    ? const Center(child: Text('Aún no hay mensajes...'))
+                    // Si hay mensajes, los muestra en una lista invertida (últimos abajo).
+                    : ListView.builder(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        reverse: true,  // El mensaje más reciente aparece al final.
+                        itemCount: state.messages.length,
+                        itemBuilder: (context, index) {
+                          // Invierte el índice para mostrar los mensajes en orden.
+                          final reversedIndex = state.messages.length - 1 - index;
+                          return _buildMessageBubble(state.messages[reversedIndex]);
+                        },
+                      ),
+              ),
+              const Divider(height: 1),  // Línea divisoria sobre la caja de texto.
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                child: Row(
+                  children: [
+                    // Campo de texto para escribir nuevos mensajes.
+                    Expanded(
+                      child: TextField(
+                        controller: _messageController,
+                        decoration: const InputDecoration(
+                          hintText: 'Escribe un mensaje...',
+                          border: OutlineInputBorder(),
+                        ),
+                        // Al presionar "Enter" envía el mensaje si no está vacío.
+                        onSubmitted: (value) {
+                          if (value.trim().isNotEmpty) {
+                            socketBloc.add(SocketSendMessageEvent(
+                                message: value.trim()));
+                            _messageController.clear();
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),  // Espacio entre el input y el botón.
+                    // Botón de envío de mensaje.
+                    IconButton(
+                      icon: const Icon(Icons.send),
+                      color: Colors.blue,
+                      // Solo se puede enviar si hay conexión.
+                      onPressed: state.isConnected
+                          ? () {
+                              final text = _messageController.text.trim();
+                              if (text.isNotEmpty) {
+                                socketBloc.add(SocketSendMessageEvent(
+                                    message: text));
+                                _messageController.clear();
+                              }
+                            }
+                          : null,  // Si no hay conexión, el botón queda desactivado.
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
