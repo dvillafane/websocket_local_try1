@@ -1,7 +1,7 @@
-import 'package:flutter/material.dart'; // Importa las herramientas visuales de Flutter
-import 'package:flutter_dotenv/flutter_dotenv.dart'; // Permite usar variables de entorno desde .env
-import 'package:socket_io_client/socket_io_client.dart'
-    as socket_io; // Cliente Socket.IO para Flutter
+import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:socket_io_client/socket_io_client.dart' as socket_io;
+import 'package:dart_jsonwebtoken/dart_jsonwebtoken.dart';
 
 // Clase que maneja la conexión y comunicación con el servidor WebSocket
 class SocketService {
@@ -9,12 +9,11 @@ class SocketService {
   final Function(String, String)
   onMessage; // Callback para manejar mensajes entrantes
   final Function(bool)
-  onConnectionStatusChange; // Callback para manejar el cambio de estado de conexión
+  onConnectionStatusChange; // Callback para cambio de estado
   int reconnectAttempts = 0; // Contador de intentos de reconexión
-  static const int maxReconnectAttempts =
-      5; // Máximo número de intentos permitidos
+  static const int maxReconnectAttempts = 5; // Máximo número de intentos
 
-  // Constructor que recibe funciones para manejar mensajes y cambios de conexión
+  // Constructor
   SocketService({
     required this.onMessage,
     required this.onConnectionStatusChange,
@@ -23,81 +22,93 @@ class SocketService {
   // Método que inicializa la conexión con el servidor WebSocket
   void initialize() {
     final String serverUrl =
-        dotenv.env['SOCKET_SERVER'] ??
-        'http://localhost:3000'; // Obtiene la URL del servidor desde .env o usa valor por defecto
+        dotenv.env['SOCKET_SERVER'] ?? 'http://localhost:3000';
+    final String jwtSecret =
+        dotenv.env['JWT_SECRET'] ?? 'default-secret'; // Lee desde .env
+
+    // Genera un token JWT (Punto 1: Autenticación con JWT)
+    final jwt = JWT({'user': 'cliente'}); // Ajusta los datos según necesidad
+    final token = jwt.sign(SecretKey(jwtSecret));
 
     socket = socket_io.io(serverUrl, <String, dynamic>{
-      'transports': ['websocket'], // Usa WebSocket como método de transporte
-      'autoConnect': false, // Evita la conexión automática
-      'auth': {
-        'token': 'tu-token-secreto',
-      }, // Token de autenticación personalizado
+      'transports': ['websocket'],
+      'autoConnect': false,
+      'auth': {'token': token},
     });
 
     // Evento cuando la conexión es exitosa
     socket.on('connect', (_) {
-      reconnectAttempts = 0; // Reinicia contador de reconexiones
-      onConnectionStatusChange(true); // Notifica que está conectado
-      debugPrint('✅ Conectado al servidor'); // Imprime mensaje de confirmación
+      reconnectAttempts = 0;
+      onConnectionStatusChange(true);
+      debugPrint('✅ Conectado al servidor');
     });
 
     // Evento cuando se pierde la conexión
     socket.on('disconnect', (_) {
-      onConnectionStatusChange(false); // Notifica que está desconectado
-      debugPrint('❌ Desconectado'); // Imprime mensaje de desconexión
+      onConnectionStatusChange(false);
+      debugPrint('❌ Desconectado');
     });
 
-    // Evento cuando ocurre un error de conexión
+    // Evento cuando ocurre un error de conexión (Punto 2: Reconexión optimizada)
     socket.on('connect_error', (error) {
-      debugPrint('❌ Error de conexión: $error'); // Muestra detalle del error
-      onConnectionStatusChange(false); // Marca como desconectado
-
-      // Si aún no ha excedido el máximo de intentos, intenta reconectar
+      debugPrint('❌ Error de conexión: $error');
+      onConnectionStatusChange(false);
       if (reconnectAttempts < maxReconnectAttempts) {
-        reconnectAttempts++; // Aumenta el contador
+        reconnectAttempts++;
+        final delay = _calculateDelay(reconnectAttempts);
         debugPrint(
-          'Intentando reconectar... ($reconnectAttempts/$maxReconnectAttempts)',
+          'Intentando reconectar en ${delay}ms... ($reconnectAttempts/$maxReconnectAttempts)',
         );
-        Future.delayed(
-          const Duration(seconds: 2),
-          reconnect,
-        ); // Espera 2 segundos y reintenta conexión
+        Future.delayed(Duration(milliseconds: delay), reconnect);
       }
+    });
+
+    // Evento para manejar errores específicos del servidor (Punto 3: Manejo de errores)
+    socket.on('error', (error) {
+      debugPrint('❌ Error del servidor: $error');
+      // Opcional: Podrías notificar a la UI con un callback adicional
     });
 
     // Evento para recibir mensajes desde el servidor
     socket.on('message', (data) {
-      if (data is Map) {
-        // Verifica que el dato recibido sea un mapa
-        final from =
-            data['from'] ??
-            'desconocido'; // Obtiene remitente o valor por defecto
-        final message =
-            data['message'] ?? ''; // Obtiene mensaje o valor por defecto
-        onMessage(
-          from.toString(),
-          message.toString(),
-        ); // Llama al callback para manejar el mensaje
+      if (data is Map &&
+          data.containsKey('from') &&
+          data.containsKey('message')) {
+        final from = data['from'].toString();
+        final message = data['message'].toString();
+        onMessage(from, message);
+      } else {
+        debugPrint('❌ Mensaje inválido recibido: $data');
       }
     });
 
-    socket.connect(); // Inicia la conexión manualmente
+    socket.connect();
   }
 
-  // Método para enviar un mensaje al servidor
+  // Método para enviar un mensaje al servidor (Punto 4: Compatible con límite de mensajes)
   void sendMessage(String message) {
     if (socket.connected) {
-      // Verifica que la conexión esté activa
-      socket.emit('clientMessage', message); // Envía el mensaje al servidor
-      onMessage(
-        'yo',
-        message,
-      ); // También actualiza el chat local con el mensaje enviado
+      socket.emit('clientMessage', message);
+      onMessage('yo', message);
+    } else {
+      debugPrint('⚠️ No se puede enviar mensaje: no conectado');
     }
   }
 
-  // Método para intentar reconectar manualmente al servidor
-  void reconnect() => socket.connect();
+  // Método para intentar reconectar manualmente
+  void reconnect() {
+    if (reconnectAttempts < maxReconnectAttempts) {
+      socket.connect();
+    }
+  }
+
+  // Calcula el retraso para la reconexión con backoff exponencial (Punto 2)
+  int _calculateDelay(int attempt) {
+    const baseDelay = 1000; // 1 segundo
+    const maxDelay = 30000; // 30 segundos
+    final delay = baseDelay * (1 << attempt); // Backoff exponencial
+    return delay > maxDelay ? maxDelay : delay;
+  }
 
   // Método para cerrar la conexión y liberar recursos
   void dispose() => socket.dispose();
