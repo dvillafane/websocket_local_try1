@@ -7,13 +7,13 @@
 require('dotenv').config();
 
 // Importa las librerías necesarias
-const express = require('express'); // Framework para servidor web
-const http = require('http'); // Módulo nativo para crear servidor HTTP
-const socketIo = require('socket.io'); // Biblioteca para comunicación WebSocket
-const sanitize = require('sanitize-html'); // Para limpiar el HTML en los mensajes
-const winston = require('winston'); // Librería para logging
-const cluster = require('cluster'); // Permite crear procesos hijos
-const os = require('os'); // Para obtener información del sistema
+const express = require('express');
+const http = require('http');
+const socketIo = require('socket.io');
+const sanitize = require('sanitize-html');
+const winston = require('winston');
+const cluster = require('cluster');
+const os = require('os');
 const readline = require('readline');
 const jwt = require('jsonwebtoken');
 
@@ -24,12 +24,12 @@ const numCPUs = os.cpus().length;
 const logger = winston.createLogger({
   level: 'info',
   format: winston.format.combine(
-    winston.format.timestamp(), // Agrega la fecha y hora a cada log
-    winston.format.json()        // Formatea los mensajes en JSON
+    winston.format.timestamp(),
+    winston.format.json()
   ),
   transports: [
-    new winston.transports.File({ filename: 'server.log' }), // Guarda logs en un archivo
-    new winston.transports.Console(), // También imprime en consola
+    new winston.transports.File({ filename: 'server.log' }),
+    new winston.transports.Console(),
   ],
 });
 
@@ -37,11 +37,11 @@ const logger = winston.createLogger({
 const PORT = process.env.PORT || 3000;
 
 // Clave secreta para JWT (debe estar en variables de entorno en producción)
-const JWT_SECRET = process.env.JWT_SECRET || 'tu-clave-secreta';
+const JWT_SECRET = process.env.JWT_SECRET || 'default-secret';
 
 // Si este proceso es el maestro...
 if (cluster.isMaster) {
-  logger.info(`Maestro ${process.pid} iniciado`); // Notifica el inicio del proceso maestro
+  logger.info(`Maestro ${process.pid} iniciado`);
 
   // Crea un worker por cada CPU disponible
   for (let i = 0; i < numCPUs; i++) {
@@ -56,15 +56,15 @@ if (cluster.isMaster) {
 
   // Configura la entrada de consola centralizada en el proceso maestro
   const rl = readline.createInterface({
-    input: process.stdin,   // Entrada de consola
-    output: process.stdout, // Salida de consola
+    input: process.stdin,
+    output: process.stdout,
   });
 
   // Cada vez que se ingresa una línea en consola
   rl.on('line', (input) => {
     const trimmedInput = input.trim();
     if (trimmedInput !== '') {
-      if (trimmedInput === 'shutdown') { // Comando para apagar el servidor
+      if (trimmedInput === 'shutdown') {
         // Enviar mensaje de apagado a todos los workers
         for (const id in cluster.workers) {
           cluster.workers[id].send({
@@ -99,8 +99,8 @@ if (cluster.isMaster) {
     cors: {
       origin: process.env.ALLOWED_ORIGINS
         ? process.env.ALLOWED_ORIGINS.split(',')
-        : ['http://localhost:3000'], // Orígenes permitidos para CORS
-      methods: ['GET', 'POST'], // Métodos HTTP permitidos
+        : ['http://localhost:3000'],
+      methods: ['GET', 'POST'],
     },
   });
 
@@ -137,7 +137,7 @@ if (cluster.isMaster) {
       const now = Date.now();
       const timestamps = messageRateLimit.get(socketId);
 
-      // Filtra timestamps del último segundo
+      // Filtra timestamps del último segundo (Punto 4: Límite de mensajes)
       const recentTimestamps = timestamps.filter((t) => now - t < 1000);
       if (recentTimestamps.length >= 5) {
         logger.warn('Límite de tasa excedido', { socketId });
@@ -149,11 +149,10 @@ if (cluster.isMaster) {
       recentTimestamps.push(now);
       messageRateLimit.set(socketId, recentTimestamps);
 
+      // Validación del mensaje (Punto 3: Manejo de errores)
       if (typeof message === 'string' && message.trim().length <= 200) {
-        // Limpia el mensaje para evitar etiquetas HTML y atributos no deseados
         const cleanMessage = sanitize(message.trim(), { allowedTags: [], allowedAttributes: {} });
         logger.info('Mensaje del cliente recibido', { message: cleanMessage });
-        // Envía el mensaje a todos menos al cliente emisor
         socket.broadcast.emit('message', { from: 'client', message: cleanMessage });
       } else {
         logger.warn('Mensaje inválido', { socketId });
@@ -167,7 +166,7 @@ if (cluster.isMaster) {
       messageRateLimit.delete(socketId); // Limpia al desconectar
     });
 
-    // Manejo de errores específicos del socket
+    // Manejo de errores específicos del socket (Punto 3: Manejo de errores)
     socket.on('error', (error) => {
       logger.error('Error en el socket', { socketId, error });
     });
@@ -177,7 +176,6 @@ if (cluster.isMaster) {
   process.on('message', (data) => {
     if (data) {
       if (data.shutdown) {
-        // Emite el mensaje de shutdown a todos los clientes conectados
         io.emit('message', { from: 'server', message: data.message });
         io.close(() => {
           logger.info('Conexiones WebSocket cerradas');
@@ -187,10 +185,18 @@ if (cluster.isMaster) {
           });
         });
       } else if (data.from && data.message) {
-        // Envía mensajes enviados desde la consola del maestro a los clientes
         io.emit('message', data);
       }
     }
+  });
+
+  // Manejo global de errores que no fueron capturados (Punto 3: Manejo de errores)
+  process.on('uncaughtException', (error) => {
+    logger.error('Error no capturado:', { error });
+  });
+
+  process.on('unhandledRejection', (reason) => {
+    logger.error('Promesa rechazada:', { reason });
   });
 
   // Inicia el servidor HTTP escuchando en el puerto configurado

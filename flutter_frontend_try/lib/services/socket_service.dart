@@ -24,10 +24,9 @@ class SocketService {
     final String serverUrl =
         dotenv.env['SOCKET_SERVER'] ?? 'http://localhost:3000';
     final String jwtSecret =
-        dotenv.env['JWT_SECRET'] ??
-        'default-secret'; // Valor por defecto si no está en .env
+        dotenv.env['JWT_SECRET'] ?? 'default-secret'; // Lee desde .env
 
-    // Genera un token JWT
+    // Genera un token JWT (Punto 1: Autenticación con JWT)
     final jwt = JWT({'user': 'cliente'}); // Ajusta los datos según necesidad
     final token = jwt.sign(SecretKey(jwtSecret));
 
@@ -50,7 +49,7 @@ class SocketService {
       debugPrint('❌ Desconectado');
     });
 
-    // Evento cuando ocurre un error de conexión
+    // Evento cuando ocurre un error de conexión (Punto 2: Reconexión optimizada)
     socket.on('connect_error', (error) {
       debugPrint('❌ Error de conexión: $error');
       onConnectionStatusChange(false);
@@ -64,7 +63,7 @@ class SocketService {
       }
     });
 
-    // Evento para manejar errores específicos del servidor
+    // Evento para manejar errores específicos del servidor (Punto 3: Manejo de errores)
     socket.on('error', (error) {
       debugPrint('❌ Error del servidor: $error');
       // Opcional: Podrías notificar a la UI con un callback adicional
@@ -86,7 +85,7 @@ class SocketService {
     socket.connect();
   }
 
-  // Método para enviar un mensaje al servidor
+  // Método para enviar un mensaje al servidor (Punto 4: Compatible con límite de mensajes)
   void sendMessage(String message) {
     if (socket.connected) {
       socket.emit('clientMessage', message);
@@ -103,7 +102,7 @@ class SocketService {
     }
   }
 
-  // Calcula el retraso para la reconexión con backoff exponencial
+  // Calcula el retraso para la reconexión con backoff exponencial (Punto 2)
   int _calculateDelay(int attempt) {
     const baseDelay = 1000; // 1 segundo
     const maxDelay = 30000; // 30 segundos
